@@ -1,0 +1,348 @@
+import requests
+import json
+import openpyxl
+import subprocess
+import smtplib
+from datetime import date
+from datetime import datetime
+from openpyxl.styles import Font, PatternFill
+from openpyxl.styles import Alignment
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.application import MIMEApplication
+from openpyxl.styles import Color, Border, Side
+from datetime import datetime, timedelta
+
+#-------------------------------------------------------------------------- Get previous Sunday's Date
+# Get the current date
+current_date = datetime.now()
+
+# Calculate the number of days until the next Sunday
+days_until_sunday = (6 - current_date.weekday()) % 7
+
+# Calculate the date for the next Sunday
+sunday_date = current_date + timedelta(days=days_until_sunday)
+
+# Calculate the date for two Sundays prior
+previous_sunday_date = sunday_date - timedelta(days=14)
+
+# Format the previous Sunday date as needed
+previous_sunday_formatted = previous_sunday_date.strftime('%Y%m%d')
+previous_sunday_reformatted = previous_sunday_date.strftime('%m-%d-%Y')
+
+LMI_Invoice = "1902-" + previous_sunday_formatted + "PR"
+LMI_Invoice_2 = "2716-" + previous_sunday_formatted + "PR"
+#--------------------------------------------------------------------------------------------- End
+
+# Set up variables
+QUICKBASE_REALM = "lmisystemsinc.quickbase.com"
+QUICKBASE_USR_TOKEN = "Token" #ENTER YOUR USER TOKEN
+QUICKBASE_DBID = "DBID" #Enter your own DBID
+QUICKBASE_WO_QUERY = "Query" #Enter your own query
+
+# Construct the API request URL
+API_URL = "https://api.quickbase.com/v1/records/query"
+#------------------------------------------------------------------ Query WO data
+# Construct headers
+HEADERS = {
+    "QB-Realm-Hostname": QUICKBASE_REALM,
+    "User-Agent": "User-Agent",
+    "Authorization": f"QB-USER-TOKEN {QUICKBASE_USR_TOKEN}",
+    "Content-Type": "application/json"
+}
+
+# Construct the JSON payload
+payload = {
+    "from": QUICKBASE_DBID,
+    "select": [3,46,466,517,810,779,148,692,11,782,690,787,788,794],
+    "where": QUICKBASE_WO_QUERY,
+    "sortBy": [
+        {"fieldId": 4, "order": "ASC"},
+        {"fieldId": 5, "order": "ASC"}
+    ],
+    "groupBy": [{"fieldId": 6, "grouping": "equal-values"}],
+    "options": {"skip": 0, "top": 0, "compareWithAppLocalTime": False}
+}
+
+# Make the API request
+response = requests.post(API_URL, headers=HEADERS, json=payload)
+#--------------------------------------------------------------------------------------------- End of Query
+if response.status_code >= 200 and response.status_code < 300:
+    data = response.json()
+    data_records = data.get("data", [])
+
+    # Create a new Excel workbook
+    workbook = openpyxl.Workbook()
+    worksheet_page1 = workbook.active
+    worksheet_page1.title = "Summary"
+    worksheet_page2 = workbook.create_sheet(title="Consolidated")
+    worksheet_page1.merge_cells('C15:F15')
+    worksheet_page1.merge_cells('C16:F17')
+
+
+    # Write titles
+    worksheet_page2.append(["File Name", "DOS MONTH", "Store", "SNOW", "Date of Service", "Material", "Trips", "Trip Rate",
+                     "Trip Total", "Hours", "Labor Rate", "Labor Total", "Lift Rental", "Lift Amount", "# of Cables Run",
+                     "Cable Rate", "Cable Drop Total", "Tax", "Grand Total", "District #", "LMI Invoice"])
+
+    # Make the column headers bold
+    for cell in worksheet_page2[1]:
+        cell.font = Font(bold=True)
+
+
+    # Make header cells starting from column 2 yellow
+    yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+    for cell in worksheet_page2.iter_cols(min_col=2, max_col=worksheet_page2.max_column, min_row=1, max_row=1):
+        for header_cell in cell:
+            header_cell.fill = yellow_fill
+
+
+    # Get the current month and day
+    #current_month = datetime.now().strftime('%B')
+    current_month = previous_sunday_date.strftime('%B')
+    current_day = previous_sunday_date.strftime('%d')
+    current_month_num = previous_sunday_date.month
+    current_year_num = previous_sunday_date.year
+    current_day_num = previous_sunday_date.day
+    #current_date = date.today()
+    #current_date_str = current_date.strftime("%m/%d/%Y")
+    current_date_str = previous_sunday_date.strftime('%m/%d/%Y')
+#--------------------------------------------------------------------------------------------- Page 1
+    for record in data_records:
+        WO_num = record.get("3", {}).get("value", "")
+        Project_Num = record.get("11", {}).get("value", "")
+        # Construct the File Name
+        file_name = f"{current_month} W/O {current_month_num}/{current_day} PR"
+
+
+        WO_num = record.get("3", {}).get("value", "")
+        text_to_format = [
+            "LMI",
+            "4680 N Royal Atlanta Dr",
+            "Tucker, GA 30084",
+            "",
+            "",
+            "Bill To Address:",
+            "NCR International, Inc.",
+            "PO Box 190939",
+            "San, Juan PR 00919-0939"
+        ]
+
+
+    bold_red_font = Font(bold=True, color="FF0000", name='Times New Roman', size=12)
+    bold_blue_font = Font(bold=True, color="0000FF", name='Times New Roman', size=12)  
+    reg_black_font = Font(bold=True, color="000000", name='Times New Roman', size=9)
+    Invoice_Date = f"{current_year_num}{current_month_num}{current_day_num}"
+    #LMI_Invoice = str(int(Project_Num)) + "-" + Invoice_Date + "PR"
+
+
+    # Set the top part of the page
+    for row in range(1, 10):
+        cell = worksheet_page1.cell(row=row, column=1)
+        cell.font = bold_blue_font
+        cell.value = text_to_format[row - 1]
+
+    table_headers = ["Date", "Invoice #", "Terms", "PO #"]
+    for col, header in enumerate(table_headers, start=1):
+        cell = worksheet_page1.cell(row=12, column=col)
+        cell.font = bold_blue_font
+        cell.value = header
+        cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+
+    # Add the table data
+    table_data = [current_date_str, LMI_Invoice, "Net 90", ""]
+    for col, data in enumerate(table_data, start=1):
+        cell = worksheet_page1.cell(row=13, column=col)
+        cell.font = reg_black_font
+        cell.value = data
+        cell.border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+
+
+    # Set the middle part with "NCRC / Wal-Mart Billable Invoice"
+    worksheet_page1.cell(row=15, column=3).value = "NCRC / Wal-Mart Billable Invoice"
+    worksheet_page1.cell(row=15, column=3).font = bold_red_font
+    worksheet_page1.cell(row=15, column=3).alignment = Alignment(horizontal='center', vertical='center')
+
+    # Set the line beneath "NCRC / Wal-Mart Billable Invoice"
+    worksheet_page1.cell(row=16, column=3).value = f"The monthly billable tickets for the period of - {current_month} {current_year_num} - 4 of 4"
+    worksheet_page1.cell(row=16, column=3).font = bold_blue_font
+    worksheet_page1.cell(row=16, column=3).alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+
+
+    # Define your table data
+    table_data = [
+        ["", "Values"],
+        ["File Name", "Sum of Material", "Sum of Labor Total", "Sum of Trip Total", "Sum of Lift Amount", "Sum of Cable Drop Total", "Sum of Grand Total"],
+        [file_name, "=SUM(Consolidated!F2:F10000)", "=SUM(Consolidated!L2:L10000)", "=SUM(Consolidated!I2:I10000)", "=SUM(Consolidated!N2:N10000)", "", "=SUM(Consolidated!S2:S10000)"],
+        ["Grand Total", "=SUM(Consolidated!F2:F10000)", "=SUM(Consolidated!L2:L10000)", "=SUM(Consolidated!I2:I10000)", "=SUM(Consolidated!N2:N10000)", "", "=SUM(Consolidated!S2:S10000)"]
+    ]
+
+    # Write the table data to the Excel workbook
+    table_start_row = 20
+    table_end_row = 23
+    bold_rows = [20, 21, 23]
+
+    for i, row in enumerate(table_data, start=table_start_row):
+        worksheet_page1.append(row)
+
+        # Apply the specified color to the top title bar and bottom row
+        if i == table_start_row + 1 or i == table_end_row:
+            for cell in worksheet_page1[i]:
+                cell.fill = PatternFill(start_color="B8CCE4", end_color="B8CCE4", fill_type="solid")
+
+        # Apply text wrapping to all cells in the table
+        for cell in worksheet_page1[i]:
+            cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+
+        # Check if the current row is in the list of rows to make bold
+        if i in bold_rows:
+            for cell in worksheet_page1[i]:
+                cell.font = Font(bold=True)
+#----------------- page 1
+        # Append necessary values in cooresponding fields
+
+        #worksheet_page1.append([])
+#------------------ end of page 1
+#--------------------------------------------------------------------------------------------- Page 2
+    workbook.active = worksheet_page2
+
+    # Write each record to subsequent rows starting from row 2 to make room for titles
+    for record in data_records:
+        WO_num = record.get("3", {}).get("value", "") #change
+        store = record.get("46", {}).get("value", "")
+        SNOW = record.get("466", {}).get("value", "")
+        DOS = record.get("517", {}).get("value", "")
+        Project_Num = record.get("11", {}).get("value", "")
+        Lift_Qty = record.get("787", {}).get("value", "")
+        State = record.get("148", {}).get("value", "") #change
+        Material = record.get("788", {}).get("value", "")
+        Trips = record.get("779", {}).get("value", "") #change
+        Time = record.get("810", {}).get("value", "")
+        Lift_Amount = record.get("782", {}).get("value", "")
+        Lift_PO = record.get("690", {}).get("value", "")
+        Tax = record.get("794", {}).get("value", "")
+#--------------------------------------------------------------------------------- Decide hours and total hours
+        Time = Time + 1
+        if Time > 2:
+            Hours = Time - 2
+            Total_Hours = Time
+        elif 0 < Time <= 2:
+            Hours = 0
+            Total_Hours = 2
+        else:
+            Hours = 0
+            Total_Hours = 0
+
+
+
+
+	# Format the date properly
+        DOS = DOS.split('T')[0]
+ 
+        if DOS:
+            # Extract the date part (up to 'T') and convert to datetime
+            date_str = DOS.split('T')[0]
+            try:
+                date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+                DOS = date_obj.strftime("%m-%d-%Y")
+            except ValueError:
+                #print(f"Invalid date format on date for WO num: {WO_Num}")
+                DOS = "Invalid Date Format"
+        else:
+            #print(f"DOS is empty for WO num: {WO_Num}")
+            DOS = "Empty Date"
+
+
+
+        # Calculate the going rate
+        if int(Project_Num) == 2716:
+            Trip_Rate = 300.00
+            Labor_Rate = 100
+        else:
+            Trip_Rate = 435.00
+            Labor_Rate = 150
+
+
+        if Lift_Qty is None:
+            # Handle the case where Lift_Qty is None (e.g., set default values)
+            Lift_Rental = "No"
+            Lift_Amount = 0.00
+        elif Lift_Qty == 0:
+            Lift_Rental = "No"
+            Lift_Amount = 0.00
+        else:
+            Lift_Rental = "Yes"
+            Lift_Amount = Lift_Amount
+
+        if Material is None:
+            # Handle the case where Lift_Qty is None (e.g., set default values)
+            Material = 0.00
+        elif Material == 0:
+            Material = 0.00
+        else:
+            Material = Material
+
+
+
+
+        Invoice_Date  = f"{current_year_num}{current_month_num}{current_day_num}"
+        #LMI_Invoice = str(int(Project_Num)) + "-" + Invoice_Date + "PR"
+
+
+        # Make necessary calculations for subsequent fields
+        Trip_Total = Trips * Trip_Rate
+        Labor_Total = float(Hours) * Labor_Rate
+        #Labor_Total = 0
+        Grand_Total = Trip_Total + Labor_Total + Tax
+
+
+        # Construct the File Name
+        file_name = f"{current_month} W/O {current_month_num}/{current_day} PR"
+
+        # Append necessary values in cooresponding fields
+
+        worksheet_page2.append([file_name, current_month, store, SNOW, DOS, Material, Trips, Trip_Rate, Trip_Total, Hours,
+                         Labor_Rate, Labor_Total, Lift_Rental, Lift_Amount, 0, float(0.00), 0.00, Tax, Grand_Total, "", LMI_Invoice])
+#------------------ end of page 
+
+    # Save the workbook to a local Excel file to be emailed out later
+    #workbook.save("US Billing AP-{current_month_num}-{current_day_num}.xlsx")
+    filename = f"PR Billing AP {previous_sunday_reformatted}.xlsx"
+    workbook.save(filename)
+
+#--------------------------------------------------------------------------------- Send Email
+    # Define email addresses and message
+    to_email = ["c.hunter@lmitsl.com"]
+    subject = "US Billing AP"
+    message_text = "Please find the attached billing log."
+
+    # Create the email message
+    msg = MIMEMultipart()
+    msg['From'] = "billing@lmitsl.com"
+    msg['To'] = ", ".join(to_email)
+    msg['Subject'] = subject
+
+    # Attach the message text
+    body = MIMEText(message_text)
+    msg.attach(body)
+
+    # Attach the file saved to the 'filename' variable
+    attachment = open(filename, 'rb')
+    xlsx = MIMEApplication(attachment.read())
+    attachment.close()
+    xlsx.add_header('Content-Disposition', 'attachment', filename=filename)
+    msg.attach(xlsx)
+
+    # Connect to the Outlook SMTP server and send the email
+    try:
+        server = smtplib.SMTP('smtp.office365.com', 587)
+        server.starttls()
+        server.login('billing@lmisystemsinc.com', 'tnftqrqwprcjzpcw')
+        server.sendmail('billing@lmitsl.com', to_email, msg.as_string())
+        server.quit()
+        print(f"Email with attachment '{filename}' sent successfully!")
+    except Exception as e:
+        print(f"Email with attachment '{filename}' could not be sent. Error: {str(e)}")
+#-------------------------------------------------------------------------------- End of Email
+else:
+    print(f"HTTP Error: {response.status_code}")
