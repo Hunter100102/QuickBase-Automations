@@ -1,0 +1,439 @@
+#!/bin/bash
+
+# Set up variables
+QUICKBASE_REALM="lmisystemsinc.quickbase.com"
+QUICKBASE_USR_TOKEN="Token" #Replace with actual data
+QUICKBASE_DBID="DBID"
+QUICKBASE_QUERY="QUERY"
+
+# Construct the API request URL
+API_URL="https://api.quickbase.com/v1/records/query"
+
+# Construct headers
+HEADERS=(
+    -H "QB-Realm-Hostname: ${QUICKBASE_REALM}"
+    -H "User-Agent: User-Agent"
+    -H "Authorization: QB-USER-TOKEN ${QUICKBASE_USR_TOKEN}"
+    -H "Content-Type: application/json"
+)
+
+# Infinite loop
+
+#while true; do
+    # Construct the JSON payload
+    PAYLOAD='{
+      "from": "'"${QUICKBASE_DBID}"'",
+      "select": [3,121,131,683,712,148,684,713,714],
+      "where": "'"${QUICKBASE_QUERY}"'",
+      "sortBy": [
+        {
+          "fieldId": 4,
+          "order": "ASC"
+        },
+        {
+          "fieldId": 5,
+          "order": "ASC"
+        }
+      ],
+      "groupBy": [
+        {
+          "fieldId": 6,
+          "grouping": "equal-values"
+        }
+      ],
+      "options": {
+        "skip": 0,
+        "top": 0,
+        "compareWithAppLocalTime": false
+      }
+    }'
+
+    # Make the API request and store the HTTP status code and JSON response in separate variables
+    HTTP_STATUS=$(curl -s -X POST "${HEADERS[@]}" -d "${PAYLOAD}" -w "%{http_code}" -o temp_response.txt "${API_URL}")
+    RESPONSE=$(cat temp_response.txt)
+    rm temp_response.txt
+
+
+
+    if [[ $HTTP_STATUS -ge 200 && $HTTP_STATUS -lt 300 ]]; then
+
+
+	# Process the response (iterate through each record)
+	data_records=$(echo "${RESPONSE}" | jq -c '.data[]')
+	for record in $data_records; do
+		WO_num=$(echo "${record}" | jq -r '.["3"].value')
+		hours=$(echo "${record}" | jq -r '.["121"].value')
+		po_num=$(echo "${record}" | jq -r '.["131"].value')
+		twohr_line=$(echo "${record}" | jq -r '.["683"].value')
+		not_us_twohr_line=$(echo "${record}" | jq -r '.["712"].value')
+		state=$(echo "${record}" | jq -r '.["148"].value')
+		onehr_line=$(echo "${record}" | jq -r '.["684"].value')
+		not_us_onehr_line=$(echo "${record}" | jq -r '.["713"].value')
+		rounded_hours=$(printf "%.2f" "$hours")
+                date=$(echo "${record}" | jq -r '.["714"].value')
+		# Convert and format the date
+		input_date=$(echo "${record}" | jq -r '.["714"].value')
+		IFS='-' read -r month day year <<< "$input_date"
+		formatted_date="$year-$month-$day"
+
+
+		echo "${formatted_date}"
+
+
+
+
+	        # Convert rounded_hours to an integer
+        	 hours_integer=${hours%.*}
+
+        	# Convert hours to a floating-point number
+        	 hours_float=$(bc <<< "$hours")
+
+	        # Calculate how many times 2 goes into the integer (whole number)
+	         two_hr_count=$((hours_integer / 2))
+
+	        # Calculate how many times 1 goes into the remainder
+	         count=$((hours_integer - 2))
+	         remainder_one_count=$(bc -l <<< "$count")
+
+
+	        # Calculate all that remains
+	         remaining=$(bc -l <<< "$hours_float - $hours_integer")
+	         total=$(bc -l <<< "$remaining + $remainder_one_count")
+	         total_formatted=$(printf "%.2f" "$total")
+                 hours_formatted=$(printf "%.2f" "$hours")
+
+
+		 #echo "record_id: $record_id"
+    		 #echo "hours: $hours"
+    		 #echo "hours_integer: $hours_integer"
+    		 #echo "hours_float: $hours_float"
+    		 #echo "two_hr_count: $two_hr_count"
+    		 #echo "remainder_one_count: $remainder_one_count"
+    		 #echo "remaining: $remaining"
+    		 #echo "total: $total"
+    		 #echo "total_formatted: $total_formatted"
+		 #echo "Hours formatted: $hours_formatted"
+		 #echo "Rounded hours: $rounded_hours"
+
+		 if [[ $po_num -eq 0 ]]; then
+
+		        # Generate a 2 hr line item
+			if [[ $(awk -v hours="$hours" 'BEGIN { if (hours > 0 && hours < 2) print 1; else print 0 }') -eq 1 && ! ($state == "AK" || $state == "PR" || $state == "HI") ]]; then
+            			# Make the API call
+            			# Construct the API URL to edit the record
+             			CHANGE_URL="https://api.quickbase.com/v1/records"
+
+            			# Construct the JSON data for the edit
+            			json_data='{
+                			"to": "DBID",
+                			"data": [
+                    			{
+                        			"3": {
+                            			"value": "'"${twohr_line}"'"
+                        			},
+                        			"6": {
+                            			"value": "1"
+                        			}
+                    			}
+                			]
+            			}'
+
+
+
+            		# Make the API call using cURL
+             		HTTP_STATUS1=$(curl -s -X POST "${HEADERS[@]}" -d "${json_data}" -w "%{http_code}" -o new_response.txt "${CHANGE_URL}")
+             		RESPONSE1=$(cat new_response.txt)
+             		rm new_response.txt
+
+			elif [[ $(awk -v hours="$hours" 'BEGIN { if (hours > 0 && hours < 2) print 1; else print 0 }') -eq 1 && ($state == "AK" || $state == "PR" || $state == "HI") ]]; then
+          			echo "In PR, HI, or AK"
+
+                                # Make the API call
+                                # Construct the API URL to edit the record
+                                CHANGE_URL="https://api.quickbase.com/v1/records"
+
+                                # Construct the JSON data for the edit
+                                json_data='{
+                                        "to": "DBID",
+                                        "data": [
+                                        {
+                                                "3": {
+                                                "value": "'"${not_us_twohr_line}"'"
+                                                },
+                                                "6": {
+                                                "value": "1"
+                                                }
+                                        }
+                                        ]
+                                }'
+
+
+
+                        # Make the API call using cURL
+                        HTTP_STATUS1=$(curl -s -X POST "${HEADERS[@]}" -d "${json_data}" -w "%{http_code}" -o new_response.txt "${CHANGE_URL}")
+                        RESPONSE1=$(cat new_response.txt)
+                        rm new_response.txt
+
+        		fi
+
+
+        		# Generate a 1 hr line item
+
+        		if [[ $(awk -v total="$total_formatted" 'BEGIN { if (total > 0) print 1; else print 0 }') -eq 1 && ! ($state == "PR" || $state == "AK" || $state == "HI") ]]; then
+
+           			# Make the API call
+            			# Construct the API URL to edit the record
+             			CHANGE_URL="https://api.quickbase.com/v1/records"
+
+            			# Construct the JSON data for the edit
+            			json_data='{
+                			"to": "DBID",
+                			"data": [
+                    			{
+                        			"3": {
+                            			"value": "'"${onehr_line}"'"
+                        			},
+                        			"6": {
+                            			"value": "'"${total_formatted}"'"
+                        			}
+                    			}
+                			]
+            				}'
+
+
+            		# Make the API call using cURL
+             		HTTP_STATUS1=$(curl -s -X POST "${HEADERS[@]}" -d "${json_data}" -w "%{http_code}" -o new_response.txt "${CHANGE_URL}")
+             		RESPONSE1=$(cat new_response.txt)
+             		rm new_response.txt
+
+        		elif [[ $(awk -v total="$total" 'BEGIN { if (total > 0) print 1; else print 0 }') -eq 1 &&  ($state == "PR" || $state == "AK" || $state == "HI") ]]; then
+                                # Make the API call
+                                # Construct the API URL to edit the record
+                                CHANGE_URL="https://api.quickbase.com/v1/records"
+
+                                # Construct the JSON data for the edit
+                                json_data='{
+                                        "to": "DBID",
+                                        "data": [
+                                        {
+                                                "3": {
+                                                "value": "'"${not_us_onehr_line}"'"
+                                                },
+                                                "6": {
+                                                "value": "'"${total_formatted}"'"
+                                                }
+                                        }
+                                        ]
+                                        }'
+
+
+                        # Make the API call using cURL
+                        HTTP_STATUS1=$(curl -s -X POST "${HEADERS[@]}" -d "${json_data}" -w "%{http_code}" -o new_response.txt "${CHANGE_URL}")
+                        RESPONSE1=$(cat new_response.txt)
+                        rm new_response.txt
+
+        		fi
+
+#WILLLL NEED TO CHANGE DATA SENT BELOW TO DYNAMICALLY MATCH FIELDS FOR 20 AND 53!!!!
+# ------------------------------------------------------------------------------------------------ Creating the Invoice
+        # Make the API call
+        # Construct the API URL to edit the record
+         CHANGE_URL="https://api.quickbase.com/v1/records"
+
+
+         invoice_json_data='{
+                "to": "DBID",
+                "data": [
+                    {
+                        "8": {
+                            "value": "'"${WO_num}"'"
+                        },
+                        "52": {
+                            "value": "Example 1: Walmart/Site ID: '"${siteid}"'/Work Type: '"${type}"'\nExample 2: Work Complete"
+                        },
+                        "20": {
+                            "value": "123456"
+                        },
+                        "53": {
+                            "value": "'"${formatted_date}"'"
+                        }
+                    }
+                ],
+                "fieldsToReturn": [
+                 3
+                 ]
+            }'
+
+
+        # Make the API call using cURL
+         HTTP_STATUS4=$(curl -s -X POST "${HEADERS[@]}" -d "${invoice_json_data}" -w "%{http_code}" -o new_response.txt "${CHANGE_URL}")
+         RESPONSE4=$(cat new_response.txt)
+         rm new_response.txt
+
+        # Get the Record ID
+         rid=$(echo "${RESPONSE4}" | jq -r '.data[0]."3".value')
+
+
+#---------------------------------------------------------------------------------------------------- Query WO line items
+
+        # Construct the JSON payload
+         LINE_PAYLOAD='{
+           "from": "bpv3u68ms",
+           "select": [3,6],
+           "where": "{11.EX.'"${WO_num}"'}AND{6.GT.0}",
+         "sortBy": [
+             {
+               "fieldId": 4,
+               "order": "ASC"
+             },
+             {
+               "fieldId": 5,
+               "order": "ASC"
+             }
+           ],
+           "groupBy": [
+             {
+               "fieldId": 6,
+               "grouping": "equal-values"
+             }
+           ],
+           "options": {
+             "skip": 0,
+             "top": 0,
+             "compareWithAppLocalTime": false
+         }
+         }'
+
+        # Make the API request and store the HTTP status code and JSON response in separate variables
+        # REMOVE THE -s TO SHOW PROGRESS WHILE MAKING API CALL!!!!!!!!!!!!!!!!!!!!!
+         HTTP_STATUS5=$(curl -s -X POST "${HEADERS[@]}" -d "${LINE_PAYLOAD}" -w "%{http_code}" -o temp_response.txt "${API_URL}")
+         RESPONSE5=$(cat temp_response.txt)
+         rm temp_response.txt
+
+	fid6=$(echo "${RESPONSE5}" | jq -r '.data[0]."6".value')
+	echo "fid 6 : ${fid6}"
+
+
+        # Check the HTTP status code
+         if [[ $HTTP_STATUS5 -ge 200 && $HTTP_STATUS5 -lt 300 ]]; then
+             line_number=1
+
+            	# Process the response (iterate through each record)
+            	 data_records=$(echo "${RESPONSE5}" | jq -c '.data[]')
+             	 for record in $data_records; do
+                 	wolinerecord_id=$(echo "${record}" | jq -r '.["3"].value')
+                 	quantity=$(echo "${record}" | jq -r '.["6"].value')
+#--------------------------------------------------------------------------------------------------- Create an invoice line item for each iteration
+            		# Make the API call
+            		# Construct the API URL to edit the record
+             		CHANGE_URL="https://api.quickbase.com/v1/records"
+
+            		# Construct the JSON data for the edit
+             		invoiceline_json_data='{
+                    		"to": "DBID",
+                    		"data": [
+                        		{
+                            		"6": {
+                                		"value": "'"${rid}"'"
+                            		},
+                            		"21": {
+                                		"value": "'"${line_number}"'"
+                            		}
+                        		}
+                    		],
+                    		"fieldsToReturn": [
+                     		3
+                     		]
+                		}'
+
+            	# Make the API call using cURL
+             	HTTP_STATUS6=$(curl -s -X POST "${HEADERS[@]}" -d "${invoiceline_json_data}" -w "%{http_code}" -o new_response.txt "${CHANGE_URL}")
+             	RESPONSE6=$(cat new_response.txt)
+             	rm new_response.txt
+             	# Get the Record ID
+             	linerid=$(echo "${RESPONSE6}" | jq -r '.data[0]."3".value')
+
+#--------------------------------------------------------------------------------------------------- Create an invoice line assignment item for each iteration
+            # Make the API call
+            # Construct the API URL to edit the record
+             CHANGE_URL="https://api.quickbase.com/v1/records"
+             # Construct the JSON data for the edit
+             invoicelineassignment_json_data='{
+                    "to": "DBID",
+                    "data": [
+                        {
+                            "6": {
+                                "value": "'"${linerid}"'"
+                            },
+                            "7": {
+                                "value": "'"${wolinerecord_id}"'"
+                            },
+                            "109": {
+                                "value": "'"${quantity}"'"
+                            }
+                        }
+                    ],
+                    "fieldsToReturn": [
+                     3
+                     ]
+                }'
+
+            # Make the API call using cURL
+             HTTP_STATUS7=$(curl -s -X POST "${HEADERS[@]}" -d "${invoicelineassignment_json_data}" -w "%{http_code}" -o new_response.txt "${CHANGE_URL}")
+             RESPONSE7=$(cat new_response.txt)
+             rm new_response.txt
+             ((line_number++))
+
+             # Get the Record ID
+             assignmentrid=$(echo "${RESPONSE7}" | jq -r '.data[0]."3".value')
+
+             done
+
+         else
+             echo "Request failed with status code ${HTTP_STATUS}."
+             echo "Error response:"
+             echo "${RESPONSE}"
+         fi
+
+
+    echo "Completed"
+
+#--------------------------------------------------------------------------------------------------- Changing the WO Status
+        # Make the API call
+        # Construct the API URL to edit the record
+         CHANGE_URL="https://api.quickbase.com/v1/records"
+
+        # Construct the JSON data for the edit
+        status_data='{
+            "to": "DBID",
+            "data": [
+                {
+                    "3": {
+                        "value": "'"${WO_num}"'"
+                    },
+                    "91": {
+                        "value": "45"
+                    }
+                }
+            ]
+        }'
+
+        echo "WO Status Changed to billing completed"
+
+
+        # Make the API call using cURL
+         HTTP_STATUS8=$(curl -s -X POST "${HEADERS[@]}" -d "${status_data}" -w "%{http_code}" -o new_response.txt "${CHANGE_URL}")
+         RESPONSE8=$(cat new_response.txt)
+         rm new_response.txt
+
+
+#-------------------fin
+
+
+
+
+
+		 fi
+	done
+
+    fi
